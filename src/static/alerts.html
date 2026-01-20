@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Alerts — NeuroCardiac Twin</title>
+    <style>
+      body{font-family:Arial,Helvetica,sans-serif;margin:12px;background:#f7f8fb;color:#111}
+      .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+      .badge{background:#e3e8ff;color:#1e40af;padding:4px 8px;border-radius:12px;font-size:12px}
+      table{width:100%;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden}
+      th,td{border-bottom:1px solid #eef2f7;padding:8px;text-align:left;vertical-align:middle}
+      thead th{background:#f1f5f9;color:#0f172a;font-weight:600}
+      tr:hover{background:#fbfdff}
+      #filters{margin-bottom:12px}
+      .spark{width:140px;height:48px}
+      .actions button{margin-right:6px}
+    </style>
+  </head>
+  <body>
+    <h2>Alert History</h2>
+    <div class="toolbar" id="filters">
+      <div>Level: <select id="levelFilter"><option value="">(any)</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></div>
+      <div>Model: <select id="modelFilter"><option value="">(any)</option><option value="rf">rf</option><option value="lstm">lstm</option><option value="heuristic">heuristic</option></select></div>
+      <div><button id="apply">Apply</button></div>
+      <div style="margin-left:auto"><a id="exportLink" class="badge" href="/api/alerts/export">Export CSV</a></div>
+    </div>
+    <div id="results">
+      <table id="alertsTable"><thead><tr><th style="width:170px">Timestamp</th><th>Level</th><th>Score</th><th>Model</th><th>Predicted</th><th style="width:160px">ECG</th><th style="width:160px">EEG</th><th>Summary</th><th>Actions</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <!-- Inline fallback renderer: populates alerts table if the main client script doesn't run -->
+    <script>
+    (function(){
+      (async function(){
+        try {
+          const tbody = document.querySelector('#alertsTable tbody');
+          if (!tbody) return;
+          if (tbody.querySelectorAll('tr').length>0) return; // already populated
+          const res = await fetch('/api/alerts');
+          if (!res.ok) return;
+          const obj = await res.json();
+          const list = obj.alerts || [];
+          for (const a of list.slice(0,200)) {
+            try {
+              const tr = document.createElement('tr');
+              const score = (a && a.threat && typeof a.threat.score === 'number') ? a.threat.score : 0.0;
+              const modelName = (a && a.threat && a.threat.model) || '';
+              const explText = a && a.explanation ? JSON.stringify(a.explanation) : '';
+              const pred = (a.threat && a.threat.predicted_class) || (a.explanation && a.explanation.predicted_class) || '';
+              tr.innerHTML = `<td>${a.timestamp}</td><td>${(a.threat||{}).level||''}</td><td>${score.toFixed(2)}</td><td>${modelName}</td><td>${pred}</td><td><canvas class="spark"></canvas></td><td><canvas class="spark"></canvas></td><td>${explText}</td><td class="actions"></td>`;
+              const btn = document.createElement('button'); btn.textContent = 'Open Detail';
+              tr.querySelector('.actions').appendChild(btn);
+              tbody.appendChild(tr);
+              // draw sparklines if signal arrays present
+              try{
+                const c1 = tr.querySelectorAll('canvas')[0];
+                const c2 = tr.querySelectorAll('canvas')[1];
+                if (a.ecg && a.ecg.length>0){ new Chart(c1.getContext('2d'), {type:'line', data:{labels:a.ecg.map((_,i)=>i), datasets:[{data:a.ecg,borderColor:'#ef4444',borderWidth:1,pointRadius:0}]}, options:{plugins:{legend:{display:false}},scales:{x:{display:false},y:{display:false}},elements:{line:{tension:0.2}}}}); }
+                if (a.eeg && a.eeg.length>0){ new Chart(c2.getContext('2d'), {type:'line', data:{labels:a.eeg.map((_,i)=>i), datasets:[{data:a.eeg,borderColor:'#2563eb',borderWidth:1,pointRadius:0}]}, options:{plugins:{legend:{display:false}},scales:{x:{display:false},y:{display:false}},elements:{line:{tension:0.2}}}}); }
+              }catch(e){}
+            } catch(e) { /* ignore row error */ }
+          }
+        } catch(e){ console.error('alerts fallback error', e); }
+      })();
+    })();
+    </script>
+
+    <!-- Server-provided initial alerts (if any) -->
+    {% if initial_alerts is defined and initial_alerts %}
+    <script>
+    (function(){
+      try {
+        const list = {{ initial_alerts|tojson|safe }} || [];
+        const tbody = document.querySelector('#alertsTable tbody');
+        if (tbody && tbody.querySelectorAll('tr').length===0) {
+          for (const a of list) {
+            try {
+              const tr = document.createElement('tr');
+              const score = (a && a.threat && typeof a.threat.score === 'number') ? a.threat.score : 0.0;
+              const modelName = (a && a.threat && a.threat.model) || '';
+              const explText = a && a.explanation ? JSON.stringify(a.explanation) : '';
+              const pred = (a.threat && a.threat.predicted_class) || (a.explanation && a.explanation.predicted_class) || '';
+              tr.innerHTML = `<td>${a.timestamp}</td><td>${(a.threat||{}).level||''}</td><td>${score.toFixed(2)}</td><td>${modelName}</td><td>${pred}</td><td><canvas class="spark"></canvas></td><td><canvas class="spark"></canvas></td><td>${explText}</td><td class="actions"></td>`;
+              const btn = document.createElement('button'); btn.textContent = 'Open Detail';
+              tr.querySelector('.actions').appendChild(btn);
+              tbody.appendChild(tr);
+              try{
+                const c1 = tr.querySelectorAll('canvas')[0];
+                const c2 = tr.querySelectorAll('canvas')[1];
+                if (a.ecg && a.ecg.length>0){ new Chart(c1.getContext('2d'), {type:'line', data:{labels:a.ecg.map((_,i)=>i), datasets:[{data:a.ecg,borderColor:'#ef4444',borderWidth:1,pointRadius:0}]}, options:{plugins:{legend:{display:false}},scales:{x:{display:false},y:{display:false}},elements:{line:{tension:0.2}}}}); }
+                if (a.eeg && a.eeg.length>0){ new Chart(c2.getContext('2d'), {type:'line', data:{labels:a.eeg.map((_,i)=>i), datasets:[{data:a.eeg,borderColor:'#2563eb',borderWidth:1,pointRadius:0}]}, options:{plugins:{legend:{display:false}},scales:{x:{display:false},y:{display:false}},elements:{line:{tension:0.2}}}}); }
+              }catch(e){}
+            } catch(e) { }
+          }
+        }
+      } catch(e) { console.error('initial alerts render failed', e); }
+    })();
+    </script>
+    {% endif %}
+
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+
+    <!-- Inline the client script for reliability: alerts.js is passed from server as `alerts_js` -->
+    {% if alerts_js %}
+    <script>
+    {{ alerts_js | safe }}
+    </script>
+    {% else %}
+    <!-- fallback: load external alerts.js if server couldn't inline it -->
+    <script src="/static/js/alerts.js"></script>
+    {% endif %}
+  </body>
+</html>
